@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: duruzi-sdk
+Version: 0.1.0
+Summary: Python client for Duruzi Serve API
+Home-page: https://github.com/duruzi-network/duruzi-sdk
+Author: Duruzi Network
+Author-email: dev@duruzi.ai
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.27
+Dynamic: author
+Dynamic: author-email
+Dynamic: home-page
+Dynamic: requires-python
+
+# Duruzi SDK
+Python client for the Duruzi Serve API.
+

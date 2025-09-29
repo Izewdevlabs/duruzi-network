@@ -1,0 +1,258 @@
+openapi: 3.1.0
+info:
+  title: Duruzi Serve API
+  version: 0.1.0
+  description: >
+    Duruzi Network Serve API for inference, model registry, endpoints, and agent coordination.
+    Authentication is via API keys (Bearer tokens). All requests should include an idempotency key
+    when creating resources.
+servers:
+  - url: https://api.duruzi.local
+    description: Dev
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: APIKey
+  parameters:
+    RequestId:
+      in: header
+      name: X-Request-ID
+      required: false
+      schema: { type: string }
+      description: Optional caller-provided request ID for tracing.
+  headers:
+    RateLimit-Limit:
+      description: The number of requests allowed in the current period.
+      schema: { type: integer }
+    RateLimit-Remaining:
+      description: The number of requests remaining in the current period.
+      schema: { type: integer }
+    RateLimit-Reset:
+      description: Seconds until the rate limit resets.
+      schema: { type: integer }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, description: Machine-readable error code }
+        message: { type: string, description: Human-friendly message }
+        request_id: { type: string }
+        details: { type: object, additionalProperties: true }
+    InferRequest:
+      type: object
+      required: [input]
+      properties:
+        input: { type: string }
+        params:
+          type: object
+          additionalProperties: [string, number, boolean]
+    InferResponse:
+      type: object
+      required: [output, usage]
+      properties:
+        output: { type: string }
+        endpoint_id: { type: string }
+        usage:
+          type: object
+          required: [prompt_tokens, completion_tokens]
+          properties:
+            prompt_tokens: { type: integer }
+            completion_tokens: { type: integer }
+    CreateModelRequest:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        artifact_uri: { type: string, description: URI to model image or weights }
+        min_gpu:
+          type: object
+          properties:
+            mem_gb: { type: integer }
+            type: { type: string }
+        params:
+          type: object
+    Model:
+      type: object
+      required: [id, name, version]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        artifact_uri: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateEndpointRequest:
+      type: object
+      required: [model_id]
+      properties:
+        model_id: { type: string }
+        route: { type: string }
+        autoscale:
+          type: object
+          properties:
+            min: { type: integer }
+            max: { type: integer }
+    Endpoint:
+      type: object
+      required: [id, model_id, route, status]
+      properties:
+        id: { type: string }
+        model_id: { type: string }
+        route: { type: string }
+        status: { type: string, enum: [creating, active, error, inactive] }
+    AgentRegisterRequest:
+      type: object
+      required: [node_id, region]
+      properties:
+        node_id: { type: string }
+        region: { type: string }
+        gpu:
+          type: object
+          properties:
+            type: { type: string }
+            mem_gb: { type: integer }
+    AgentHeartbeatRequest:
+      type: object
+      required: [node_id, status]
+      properties:
+        node_id: { type: string }
+        status: { type: string, enum: [healthy, degraded, down] }
+        capacity:
+          type: object
+          properties:
+            tpms: { type: integer, description: tokens per minute sustained }
+security:
+  - BearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness/Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  service: { type: string }
+                  version: { type: string }
+  /v1/infer/{endpoint_id}:
+    post:
+      summary: Run inference on a deployed endpoint
+      parameters:
+        - name: endpoint_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InferRequest' }
+      responses:
+        '200':
+          description: Inference completed
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimit-Limit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimit-Remaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimit-Reset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/models:
+    post:
+      summary: Create/Upload a model entry
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateModelRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Model' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/endpoints:
+    post:
+      summary: Create a new endpoint for a model
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEndpointRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Endpoint' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/agents/register:
+    post:
+      summary: Register an agent/node with the control plane
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentRegisterRequest' }
+      responses:
+        '200':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+  /v1/agents/heartbeat:
+    post:
+      summary: Send a heartbeat from an agent/node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentHeartbeatRequest' }
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
